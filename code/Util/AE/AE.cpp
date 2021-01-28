@@ -72,7 +72,9 @@ static PyObject *AE_Encode(PyObject *self, PyObject *args)
 			return NULL;
 		}
 		Datas.push_back(static_cast<int32_t>(PyLong_AsLong(next)));
+		Py_DECREF(next);
 	}
+	Py_DECREF(iter_datas);
 
 	// ================================================== //
 	PyObject *iter_means = PyObject_GetIter(obj_means);
@@ -89,7 +91,9 @@ static PyObject *AE_Encode(PyObject *self, PyObject *args)
 			return NULL;
 		}
 		Means.push_back(static_cast<double_t>(PyFloat_AS_DOUBLE(next)));
+		Py_DECREF(next);
 	}
+	Py_DECREF(iter_means);
 
 	// ================================================== //
 	PyObject *iter_scales = PyObject_GetIter(obj_scales);
@@ -106,7 +110,9 @@ static PyObject *AE_Encode(PyObject *self, PyObject *args)
 			return NULL;
 		}
 		Scales.push_back(static_cast<double_t>(PyFloat_AS_DOUBLE(next)));
+		Py_DECREF(next);
 	}
+	Py_DECREF(iter_scales);
 
 	// ================================================== //
 	return (PyObject *)Py_BuildValue("b", My_Encode(Datas, Means, Scales, file_name));
@@ -161,7 +167,9 @@ static PyObject *AE_Encode_Cdf(PyObject *self, PyObject *args)
 			return NULL;
 		}
 		cdf_0.push_back(static_cast<uint32_t>(PyLong_AsLong(next)));
+		Py_DECREF(next);
 	}
+	Py_DECREF(iter_cdf_0);
 
 	// ================================================== //
 	PyObject *iter_cdf_1 = PyObject_GetIter(obj_cdf_1);
@@ -178,7 +186,9 @@ static PyObject *AE_Encode_Cdf(PyObject *self, PyObject *args)
 			return NULL;
 		}
 		cdf_1.push_back(static_cast<uint32_t>(PyLong_AsLong(next)));
+		Py_DECREF(next);
 	}
+	Py_DECREF(iter_cdf_1);
 
 	// ================================================== //
 	return (PyObject *)Py_BuildValue("b", My_Encode_Cdf(cdf_0, cdf_1, file_name));
@@ -213,7 +223,9 @@ static PyObject *AE_Decode_Cdf(PyObject *self, PyObject *args)
 			return NULL;
 		}
 		cdf.push_back(static_cast<uint32_t>(PyLong_AsLong(next)));
+		Py_DECREF(next);
 	}
+	Py_DECREF(iter_cdf);
 
 	// ================================================== //
 	return (PyObject *)Py_BuildValue("i", My_Decode_Cdf(cdf));
