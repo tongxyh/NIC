@@ -4,6 +4,11 @@ import os
 import struct
 import sys
 import time
+from decimal import *
+import decimal
+
+decimal.getcontext().prec = 32
+
 from glob import glob
 
 import numpy as np
@@ -15,9 +20,13 @@ from PIL import Image
 import AE
 import Model.model as model
 from Model.context_model import Weighted_Gaussian
+import Util.ops as ops
 
+# avoid memory leak during cpu inference for Pytorch < 1.5
+# more details: https://github.com/pytorch/pytorch/issues/27971
+os.environ['LRU_CACHE_CAPACITY'] = '1'
+GPU = True
 
-GPU = False
 # index - [0-15]
 models = ["mse200", "mse400", "mse800", "mse1600", "mse3200", "mse6400", "mse12800", "mse25600",
           "msssim4", "msssim8", "msssim16", "msssim32", "msssim64", "msssim128", "msssim320", "msssim640"]
@@ -37,8 +46,8 @@ def encode(im_dir, out_dir, model_dir, model_index, block_width, block_height):
     context.load_state_dict(torch.load(
         os.path.join(model_dir, models[model_index] + r'p.pkl'), map_location='cpu'))
     if GPU:
-        image_comp.cuda()
-        context.cuda()
+        image_comp = image_comp.cuda()
+        context = context.cuda()
     ######################### Read Image #########################
     img = Image.open(im_dir)
     img = np.array(img)/255.0
@@ -77,12 +86,16 @@ def encode(im_dir, out_dir, model_dir, model_index, block_width, block_height):
         with torch.no_grad():
             y_main, y_hyper = image_comp.encoder(im)
             y_main_q = torch.round(y_main)
-            y_main_q = torch.Tensor(y_main_q.numpy().astype(np.int))
+            y_main_q = torch.Tensor(y_main_q.cpu().numpy().astype(np.int))
+            if GPU:
+                y_main_q = y_main_q.cuda()
 
             # y_hyper_q = torch.round(y_hyper)
 
             y_hyper_q, xp2 = image_comp.factorized_entropy_func(y_hyper, 2)
-            y_hyper_q = torch.Tensor(y_hyper_q.numpy().astype(np.int))
+            y_hyper_q = torch.Tensor(y_hyper_q.cpu().numpy().astype(np.int))
+            if GPU:
+                y_hyper_q = y_hyper_q.cuda()
 
             hyper_dec = image_comp.p(image_comp.hyper_dec(y_hyper_q))
 
@@ -92,12 +105,14 @@ def encode(im_dir, out_dir, model_dir, model_index, block_width, block_height):
         Datas = torch.reshape(y_main_q, [-1]).cpu().numpy().astype(np.int).tolist()
         Max_Main = max(Datas)
         Min_Main = min(Datas)
-        sample = np.arange(Min_Main, Max_Main+1+1)  # [Min_V - 0.5 , Max_V + 0.5]
+        sample = np.arange(Min_Main, Max_Main+1+1).tolist()  # [Min_V - 0.5 , Max_V + 0.5]
         _, c, h, w = y_main_q.shape
         print("Main Channel:", c)
-        sample = torch.FloatTensor(np.tile(sample, [1, c, h, w, 1]))
+        # sample = torch.FloatTensor(np.tile(sample, [1, c, h, w, 1]))
+        # if GPU:
+        #     sample = sample.cuda()
 
-        # 3 gaussian
+        # 3 mixed gaussian
         prob0, mean0, scale0, prob1, mean1, scale1, prob2, mean2, scale2 = [
             torch.chunk(params_prob, 9, dim=1)[i].squeeze(1) for i in range(9)]
         del params_prob
@@ -114,23 +129,39 @@ def encode(im_dir, out_dir, model_dir, model_index, block_width, block_height):
         scale1[scale1 < 1e-6] = 1e-6
         scale2[scale2 < 1e-6] = 1e-6
 
-        m0 = torch.distributions.normal.Normal(mean0, scale0)
-        m1 = torch.distributions.normal.Normal(mean1, scale1)
-        m2 = torch.distributions.normal.Normal(mean2, scale2)
-        lower = torch.zeros(1, c, h, w, Max_Main-Min_Main+2)
-        for i in range(sample.shape[4]):
-            # print("CDF:", i)
-            lower0 = m0.cdf(sample[:, :, :, :, i]-0.5)
-            lower1 = m1.cdf(sample[:, :, :, :, i]-0.5)
-            lower2 = m2.cdf(sample[:, :, :, :, i]-0.5)
-            lower[:, :, :, :, i] = probs[:, :, :, :, 0]*lower0 + \
-                probs[:, :, :, :, 1]*lower1+probs[:, :, :, :, 2]*lower2
-        del probs, lower0, lower1, lower2
-
+        ###### TEST FIELD ######
+        t = time.time()
         precise = 16
-        cdf_m = lower.data.cpu().numpy()*((1 << precise) - (Max_Main -
-                                                            Min_Main + 1))  # [1, c, h, w ,Max-Min+1]
-        cdf_m = cdf_m.astype(np.int32) + sample.numpy().astype(np.int32) - Min_Main
+        samples = np.arange(Min_Main, Max_Main+1+1)  # [Min_V - 0.5 , Max_V + 0.5]
+        
+        mean0_ = torch.reshape(mean0, [-1]).cpu().numpy().tolist()
+        mean1_ = torch.reshape(mean1, [-1]).cpu().numpy().tolist()
+        mean2_ = torch.reshape(mean2, [-1]).cpu().numpy().tolist()
+        
+        scale0_ = torch.reshape(scale0, [-1]).cpu().numpy().tolist()
+        scale1_ = torch.reshape(scale1, [-1]).cpu().numpy().tolist()
+        scale2_ = torch.reshape(scale2, [-1]).cpu().numpy().tolist()
+        
+        probs0_ = torch.reshape(probs[:, :, :, :, 0],[-1]).cpu().numpy().tolist()
+        probs1_ = torch.reshape(probs[:, :, :, :, 1],[-1]).cpu().numpy().tolist()
+        probs2_ = torch.reshape(probs[:, :, :, :, 2],[-1]).cpu().numpy().tolist() # [N]
+        print("Time (s):", time.time() - t)
+        lower = []
+        factor = (1 << precise) - (Max_Main - Min_Main + 1)
+        for sample in samples:
+            t_s = time.time()
+            sample_ = np.repeat(sample-0.5, len(Datas)).tolist()
+            lower0 = list(map(ops.Decimal_cdf, sample_, mean0_, scale0_))
+            lower1 = list(map(ops.Decimal_cdf, sample_, mean1_, scale1_))
+            lower2 = list(map(ops.Decimal_cdf, sample_, mean2_, scale2_))        
+            lower.append([int((Decimal(p0)*l0+Decimal(p1)*l1+Decimal(p2)*l2) * factor) for l0,l1,l2,p0,p1,p2 in zip(lower0, lower1, lower2, probs0_, probs1_, probs2_)])
+            print(sample, "Time (s):", time.time() - t_s)
+        # int2np
+        cdf_m = np.array(lower).transpose()
+        print("Time (s):", time.time() - t)
+        ####### TEST FIELD #######
+        
+        cdf_m = cdf_m.astype(np.int32) + samples.astype(np.int32) - Min_Main
         cdf_main = np.reshape(cdf_m, [len(Datas), -1])
 
         # Cdf[Datas - Min_V]
