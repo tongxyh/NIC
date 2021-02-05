@@ -25,7 +25,7 @@ import Util.ops as ops
 # avoid memory leak during cpu inference for Pytorch < 1.5
 # more details: https://github.com/pytorch/pytorch/issues/27971
 os.environ['LRU_CACHE_CAPACITY'] = '1'
-GPU = True
+GPU = False
 
 # index - [0-15]
 models = ["mse200", "mse400", "mse800", "mse1600", "mse3200", "mse6400", "mse12800", "mse25600",
@@ -183,8 +183,11 @@ def encode(im_dir, out_dir, model_dir, model_index, block_width, block_height):
         # [Min_V - 0.5 , Max_V + 0.5]
         sample = np.arange(Min_V_HYPER, Max_V_HYPER+1+1)
         sample = np.tile(sample, [c, 1, 1])
+        sample_tensor = torch.FloatTensor(sample)
+        if GPU:
+            sample_tensor = sample_tensor.cuda()
         lower = torch.sigmoid(image_comp.factorized_entropy_func._logits_cumulative(
-            torch.FloatTensor(sample) - 0.5, stop_gradient=False))
+            sample_tensor - 0.5, stop_gradient=False))
         cdf_h = lower.data.cpu().numpy()*((1 << precise) - (Max_V_HYPER -
                                                             Min_V_HYPER + 1))  # [N1, 1, Max-Min+1]
         cdf_h = cdf_h.astype(np.int) + sample.astype(np.int) - Min_V_HYPER
@@ -249,8 +252,8 @@ def decode(bin_dir, rec_dir, model_dir, block_width, block_height):
     context.load_state_dict(torch.load(
         os.path.join(model_dir, models[model_index] + r'p.pkl'), map_location='cpu'))
     if GPU:
-        image_comp.cuda()
-        context.cuda()
+        image_comp = image_comp.cuda()
+        context = context.cuda()
         
     for i in range(Block_Num_in_Height):
         for j in range(Block_Num_in_Width):
@@ -275,8 +278,11 @@ def decode(bin_dir, rec_dir, model_dir, block_width, block_height):
             # [Min_V - 0.5 , Max_V + 0.5]
             sample = np.arange(Min_V_HYPER, Max_V_HYPER+1+1)
             sample = np.tile(sample, [c_hyper, 1, 1])
+            sample_tensor = torch.FloatTensor(sample)
+            if GPU:
+                sample_tensor = sample_tensor.cuda()
             lower = torch.sigmoid(image_comp.factorized_entropy_func._logits_cumulative(
-                torch.FloatTensor(sample) - 0.5, stop_gradient=False))
+                sample_tensor - 0.5, stop_gradient=False))
             cdf_h = lower.data.cpu().numpy()*((1 << precise) - (Max_V_HYPER -
                                                                 Min_V_HYPER + 1))  # [N1, 1, Max - Min]
             cdf_h = cdf_h.astype(np.int) + sample.astype(np.int) - Min_V_HYPER
@@ -292,14 +298,16 @@ def decode(bin_dir, rec_dir, model_dir, block_width, block_height):
                 Recons), [1, c_hyper, int(block_H_PAD / 64), int(block_W_PAD / 64)])
 
             ############### Main Decoder ###############
+            if GPU:
+                y_hyper_q = y_hyper_q.cuda()
             hyper_dec = image_comp.p(image_comp.hyper_dec(y_hyper_q))
             h, w = int(block_H_PAD / 16), int(block_W_PAD / 16)
-            sample = np.arange(Min_Main, Max_Main+1+1)  # [Min_V - 0.5 , Max_V + 0.5]
-
-            sample = torch.FloatTensor(sample)
+            samples = np.arange(Min_Main, Max_Main+1+1)  # [Min_V - 0.5 , Max_V + 0.5]
 
             p3d = (5, 5, 5, 5, 5, 5)
             y_main_q = torch.zeros(1, 1, c_main+10, h+10, w+10)  # 8000x4000 -> 500*250
+            if GPU:
+                y_main_q = y_main_q.cuda()
             AE.init_decoder("main.bin", Min_Main, Max_Main)
             hyper = torch.unsqueeze(context.conv3(hyper_dec), dim=1)
 
@@ -309,45 +317,55 @@ def decode(bin_dir, rec_dir, model_dir, block_width, block_height):
             for i in range(c_main):
                 T = time.time()
                 for j in range(int(block_H_PAD / 16)):
+                    # for k in range(int(block_W_PAD / 16)):
+
+                    x1 = F.conv3d(y_main_q[:, :, i:i+12, j:j+12, :],
+                                    weight=context.conv1.weight, bias=context.conv1.bias)  # [1,24,1,1,1]
+                    params_prob = context.conv2(
+                        torch.cat((x1, hyper[:, :, i:i+2, j:j+2, :]), dim=1))
+
+                    # 3 gaussian
+                    prob0, mean0, scale0, prob1, mean1, scale1, prob2, mean2, scale2 = params_prob[
+                        0, :, 0, 0, :]
+                    # keep the weight  summation of prob == 1
+                    probs = torch.stack([prob0, prob1, prob2], dim=-1)
+                    probs = F.softmax(probs, dim=-1)
+                    print(probs.shape, mean0.shape)
+                    # process the scale value to positive non-zero
+                    scale0 = torch.abs(scale0)
+                    scale1 = torch.abs(scale1)
+                    scale2 = torch.abs(scale2)
+                    scale0[scale0 < 1e-6] = 1e-6
+                    scale1[scale1 < 1e-6] = 1e-6
+                    scale2[scale2 < 1e-6] = 1e-6
+
+                    mean0_ = mean0.cpu().numpy().tolist()
+                    mean1_ = torch.reshape(mean1, [-1]).cpu().numpy().tolist()
+                    mean2_ = torch.reshape(mean2, [-1]).cpu().numpy().tolist()
+                    
+                    scale0_ = torch.reshape(scale0, [-1]).cpu().numpy().tolist()
+                    scale1_ = torch.reshape(scale1, [-1]).cpu().numpy().tolist()
+                    scale2_ = torch.reshape(scale2, [-1]).cpu().numpy().tolist()
+                    
+                    probs0_ = torch.reshape(probs[:, 0],[-1]).cpu().numpy().tolist()
+                    probs1_ = torch.reshape(probs[:, 1],[-1]).cpu().numpy().tolist()
+                    probs2_ = torch.reshape(probs[:, 2],[-1]).cpu().numpy().tolist() # [N]
+
+                    # 3 gaussian distributions
+                    lower = []
+                    factor = (1 << precise) - (Max_Main - Min_Main + 1)
+                    for sample in samples:
+                        sample_ = np.repeat(sample-0.5, len(mean0_)).tolist()
+                        lower0 = list(map(ops.Decimal_cdf, sample_, mean0_, scale0_))
+                        lower1 = list(map(ops.Decimal_cdf, sample_, mean1_, scale1_))
+                        lower2 = list(map(ops.Decimal_cdf, sample_, mean2_, scale2_))        
+                        lower.append([int((Decimal(p0)*l0+Decimal(p1)*l1+Decimal(p2)*l2) * factor) for l0,l1,l2,p0,p1,p2 in zip(lower0, lower1, lower2, probs0_, probs1_, probs2_)])
+                    
+                    cdf_m = np.array(lower).transpose()
+                    cdf_m = cdf_m.astype(np.int) + samples.astype(np.int) - Min_Main
+
                     for k in range(int(block_W_PAD / 16)):
-
-                        x1 = F.conv3d(y_main_q[:, :, i:i+12, j:j+12, k:k+12],
-                                      weight=context.conv1.weight, bias=context.conv1.bias)  # [1,24,1,1,1]
-                        params_prob = context.conv2(
-                            torch.cat((x1, hyper[:, :, i:i+2, j:j+2, k:k+2]), dim=1))
-
-                        # 3 gaussian
-                        prob0, mean0, scale0, prob1, mean1, scale1, prob2, mean2, scale2 = params_prob[
-                            0, :, 0, 0, 0]
-                        # keep the weight  summation of prob == 1
-                        probs = torch.stack([prob0, prob1, prob2], dim=-1)
-                        probs = F.softmax(probs, dim=-1)
-
-                        # process the scale value to positive non-zero
-                        scale0 = torch.abs(scale0)
-                        scale1 = torch.abs(scale1)
-                        scale2 = torch.abs(scale2)
-                        scale0[scale0 < 1e-6] = 1e-6
-                        scale1[scale1 < 1e-6] = 1e-6
-                        scale2[scale2 < 1e-6] = 1e-6
-                        # 3 gaussian distributions
-                        m0 = torch.distributions.normal.Normal(mean0.view(1, 1).repeat(
-                            1, Max_Main-Min_Main+2), scale0.view(1, 1).repeat(1, Max_Main-Min_Main+2))
-                        m1 = torch.distributions.normal.Normal(mean1.view(1, 1).repeat(
-                            1, Max_Main-Min_Main+2), scale1.view(1, 1).repeat(1, Max_Main-Min_Main+2))
-                        m2 = torch.distributions.normal.Normal(mean2.view(1, 1).repeat(
-                            1, Max_Main-Min_Main+2), scale2.view(1, 1).repeat(1, Max_Main-Min_Main+2))
-                        lower0 = m0.cdf(sample-0.5)
-                        lower1 = m1.cdf(sample-0.5)
-                        lower2 = m2.cdf(sample-0.5)  # [1,c,h,w,Max-Min+2]
-
-                        lower = probs[0:1]*lower0+probs[1:2]*lower1+probs[2:3]*lower2
-                        cdf_m = lower.data.cpu().numpy()*((1 << precise) - (Max_Main -
-                                                                            Min_Main + 1))  # [1, c, h, w ,Max-Min+1]
-                        cdf_m = cdf_m.astype(np.int) + \
-                            sample.numpy().astype(np.int) - Min_Main
-
-                        pixs = AE.decode_cdf(cdf_m[0, :].tolist())
+                        pixs = AE.decode_cdf(cdf_m[k, :].tolist())
                         y_main_q[0, 0, i+5, j+5, k+5] = pixs
 
                 print("Decoding Channel (%d/192), Time (s): %0.4f" % (i, time.time()-T))
@@ -382,8 +400,8 @@ if __name__ == '__main__':
     args = parser.parse_args()
   
     T = time.time()
-    #if args.coder_flag:
-    if True:
+    if args.coder_flag:
+#     if True:
         encode(args.input, args.output, args.model_dir, args.model, args.block_width, args.block_height)
     else:
         decode(args.input, args.output, args.model_dir, args.block_width, args.block_height)
