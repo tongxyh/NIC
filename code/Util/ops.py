@@ -6,6 +6,7 @@ from functools import partial
 sys.setrecursionlimit(1000000)
 
 precise = 16
+D = Decimal
 decimal.getcontext().prec = precise
 # print(decimal.getcontext().rounding)
 half = Decimal("0.5")
@@ -34,24 +35,29 @@ a6 = Decimal(0.0000430638)
 lower = Decimal(0)
 upper = Decimal(5)
 
-def round_check(x):
-    D = Decimal
-    # x_m = D(x).quantize(D("0.01"))
-    
-    # # max observed error 8e-6
-    # # closer to zero, less error, can it help?
-    # x_l = D(x-(x*0.0000017)).quantize(D("0.01"))
-    # x_u = D(x+(x*0.0000017)).quantize(D("0.01"))
+def index_to_loc(x, H_PAD, W_PAD):
+    c_index = x // int(H_PAD/16*W_PAD/16)
+    h_index = (x % int(H_PAD/16*W_PAD/16)) // int(W_PAD/16)
+    w_index = (x % int(H_PAD/16*W_PAD/16)) % int(W_PAD/16)
+    return c_index, h_index, w_index
 
-    # if x_l == x_u:
-    #     return x_m, 0
-    # if x_m == x_l:
-    #     print(x, x_m, x_l, x_u)
-    #     return x_l, -1
-    # else:
-    #     print(x, x_m, x_l, x_u)
-    #     return x_u, 1
-    return D(x), 0
+def round_check(x):
+    x_m = D(x).quantize(D("0.01"))
+    
+    # max observed error 8e-6
+    # closer to zero, less error, can it help?
+    x_l = D(x-(abs(x)*0.000001)).quantize(D("0.01"))
+    x_u = D(x+(abs(x)*0.000001)).quantize(D("0.01"))
+
+    if x_l == x_u:
+        return x_m, 0
+    if x_m == x_l:
+        print(x, x_m, x_l, x_u)
+        return x_l, -1
+    else:
+        print(x, x_m, x_l, x_u)
+        return x_u, 1
+    return D(x).quantize(D("0.01")), 0
 
 def quick_search(x, i):
     global lower,upper
@@ -106,7 +112,7 @@ def quantized_erf(x, level=1):
         return 1-1/(1+a1*x+a2*(x**n2)+a3*(x**n3)+a4*(x**4)+a5*(x**5)+a6*(x**6))**16
 
 def Decimal_cdf(x,mean,scale):
-    x = (Decimal(x).quantize(Decimal("0.0001"))-mean[0]-half)/(sqrt2*scale[0]+Decimal("0.00001"))
+    x = (Decimal(x).quantize(D("0.0001"))-mean[0]-half)/(sqrt2*scale[0]+D("0.00001"))
     sign = half if x >= 0 else -half
     if abs(x) > Decimal(3.5):
         return half + sign
@@ -114,10 +120,10 @@ def Decimal_cdf(x,mean,scale):
         return half + sign*table[int(abs(x.quantize(quan_prec)*100000))]
         # return half + sign*half*quantized_erf(abs(x))
 
-def Decimal_cdf_(x, mean, scale):
+def Decimal_cdf_(x, mean=0, scale=D(1e-6)):
     # batch version
     partial_func = partial(Decimal_cdf,mean=mean,scale=scale)
-    return list(map(partial_func, x))    
+    return list(map(partial_func, x))
 
 def erf(x, level=0):
     if level == 0:
@@ -134,6 +140,11 @@ def Decimal_cdf_np(x, mean, scale):
     pass
 
 table = cdf_table()
+# sample = [1,2,3]
+# Decimal_cdf_partial = partial(Decimal_cdf_, x=sample)
+# def partial_cdf(mean, scale):
+#     return Decimal_cdf_partial(mean=mean, scale=scale)
+# partial_cdf([1,1],[1,1])
 # import profile
 # profile.run('Decimal_cdf_([0,0,0,0,0],[1,1,1,1,1,1],[2,2,2,2,2,2])')
 # cdf_table()
