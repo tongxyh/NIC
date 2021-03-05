@@ -7,19 +7,12 @@ import os
 import struct
 import sys
 import time
-<<<<<<< HEAD
-from decimal import *
-import decimal
-
-decimal.getcontext().prec = 32
-=======
 from functools import partial
 # from multiprocessing import Pool
 from decimal import *
 import decimal
 D = Decimal
 decimal.getcontext().prec = 16
->>>>>>> 176b16e7961d9504ca35008c58dac1a4f9835c40
 
 from glob import glob
 
@@ -32,14 +25,6 @@ from PIL import Image
 import AE
 import Model.model as model
 from Model.context_model import Weighted_Gaussian
-<<<<<<< HEAD
-import Util.ops as ops
-
-# avoid memory leak during cpu inference for Pytorch < 1.5
-# more details: https://github.com/pytorch/pytorch/issues/27971
-os.environ['LRU_CACHE_CAPACITY'] = '1'
-GPU = False
-=======
 from Util import ops
 
 import profile
@@ -48,7 +33,6 @@ import profile
 os.environ['LRU_CACHE_CAPACITY'] = '1'
 GPU = True
 DEBUG = True
->>>>>>> 176b16e7961d9504ca35008c58dac1a4f9835c40
 
 # index - [0-15]
 models = ["mse200", "mse400", "mse800", "mse1600", "mse3200", "mse6400", "mse12800", "mse25600",
@@ -135,56 +119,6 @@ def encode(im_dir, out_dir, model_dir, model_index, block_width, block_height):
         # if GPU:
         #     sample = sample.cuda()
 
-<<<<<<< HEAD
-        # 3 mixed gaussian
-        prob0, mean0, scale0, prob1, mean1, scale1, prob2, mean2, scale2 = [
-            torch.chunk(params_prob, 9, dim=1)[i].squeeze(1) for i in range(9)]
-        del params_prob
-        # keep the weight summation of prob == 1
-        probs = torch.stack([prob0, prob1, prob2], dim=-1)
-        del prob0, prob1, prob2
-
-        probs = F.softmax(probs, dim=-1)
-        # process the scale value to positive non-zero
-        scale0 = torch.abs(scale0)
-        scale1 = torch.abs(scale1)
-        scale2 = torch.abs(scale2)
-        scale0[scale0 < 1e-6] = 1e-6
-        scale1[scale1 < 1e-6] = 1e-6
-        scale2[scale2 < 1e-6] = 1e-6
-
-        ###### TEST FIELD ######
-        t = time.time()
-        precise = 16
-        samples = np.arange(Min_Main, Max_Main+1+1)  # [Min_V - 0.5 , Max_V + 0.5]
-        
-        mean0_ = torch.reshape(mean0, [-1]).cpu().numpy().tolist()
-        mean1_ = torch.reshape(mean1, [-1]).cpu().numpy().tolist()
-        mean2_ = torch.reshape(mean2, [-1]).cpu().numpy().tolist()
-        
-        scale0_ = torch.reshape(scale0, [-1]).cpu().numpy().tolist()
-        scale1_ = torch.reshape(scale1, [-1]).cpu().numpy().tolist()
-        scale2_ = torch.reshape(scale2, [-1]).cpu().numpy().tolist()
-        
-        probs0_ = torch.reshape(probs[:, :, :, :, 0],[-1]).cpu().numpy().tolist()
-        probs1_ = torch.reshape(probs[:, :, :, :, 1],[-1]).cpu().numpy().tolist()
-        probs2_ = torch.reshape(probs[:, :, :, :, 2],[-1]).cpu().numpy().tolist() # [N]
-        print("Time (s):", time.time() - t)
-        lower = []
-        factor = (1 << precise) - (Max_Main - Min_Main + 1)
-        for sample in samples:
-            t_s = time.time()
-            sample_ = np.repeat(sample-0.5, len(Datas)).tolist()
-            lower0 = list(map(ops.Decimal_cdf, sample_, mean0_, scale0_))
-            lower1 = list(map(ops.Decimal_cdf, sample_, mean1_, scale1_))
-            lower2 = list(map(ops.Decimal_cdf, sample_, mean2_, scale2_))        
-            lower.append([int((Decimal(p0)*l0+Decimal(p1)*l1+Decimal(p2)*l2) * factor) for l0,l1,l2,p0,p1,p2 in zip(lower0, lower1, lower2, probs0_, probs1_, probs2_)])
-            print(sample, "Time (s):", time.time() - t_s)
-        # int2np
-        cdf_m = np.array(lower).transpose()
-        print("Time (s):", time.time() - t)
-        ####### TEST FIELD #######
-=======
         # N mixed gaussian
         N = 1
         #params = [torch.chunk(params_prob, 3*N, dim=1)[i].squeeze(1) for i in range(3*N)]
@@ -338,7 +272,6 @@ def encode(im_dir, out_dir, model_dir, model_index, block_width, block_height):
         # int2np
         cdf_m = np.array(lower).transpose()
         # print("Time (s):", time.time() - t)
->>>>>>> 176b16e7961d9504ca35008c58dac1a4f9835c40
         
         cdf_m = cdf_m.astype(np.int32) + samples.astype(np.int32) - Min_Main
         cdf_main = np.reshape(cdf_m, [len(Datas), -1])
@@ -506,54 +439,6 @@ def decode(bin_dir, rec_dir, model_dir, block_width, block_height):
             for i in range(c_main):
                 T = time.time()
                 for j in range(int(block_H_PAD / 16)):
-<<<<<<< HEAD
-                    # for k in range(int(block_W_PAD / 16)):
-
-                    x1 = F.conv3d(y_main_q[:, :, i:i+12, j:j+12, :],
-                                    weight=context.conv1.weight, bias=context.conv1.bias)  # [1,24,1,1,1]
-                    params_prob = context.conv2(
-                        torch.cat((x1, hyper[:, :, i:i+2, j:j+2, :]), dim=1))
-
-                    # 3 gaussian
-                    prob0, mean0, scale0, prob1, mean1, scale1, prob2, mean2, scale2 = params_prob[
-                        0, :, 0, 0, :]
-                    # keep the weight  summation of prob == 1
-                    probs = torch.stack([prob0, prob1, prob2], dim=-1)
-                    probs = F.softmax(probs, dim=-1)
-                    print(probs.shape, mean0.shape)
-                    # process the scale value to positive non-zero
-                    scale0 = torch.abs(scale0)
-                    scale1 = torch.abs(scale1)
-                    scale2 = torch.abs(scale2)
-                    scale0[scale0 < 1e-6] = 1e-6
-                    scale1[scale1 < 1e-6] = 1e-6
-                    scale2[scale2 < 1e-6] = 1e-6
-
-                    mean0_ = mean0.cpu().numpy().tolist()
-                    mean1_ = torch.reshape(mean1, [-1]).cpu().numpy().tolist()
-                    mean2_ = torch.reshape(mean2, [-1]).cpu().numpy().tolist()
-                    
-                    scale0_ = torch.reshape(scale0, [-1]).cpu().numpy().tolist()
-                    scale1_ = torch.reshape(scale1, [-1]).cpu().numpy().tolist()
-                    scale2_ = torch.reshape(scale2, [-1]).cpu().numpy().tolist()
-                    
-                    probs0_ = torch.reshape(probs[:, 0],[-1]).cpu().numpy().tolist()
-                    probs1_ = torch.reshape(probs[:, 1],[-1]).cpu().numpy().tolist()
-                    probs2_ = torch.reshape(probs[:, 2],[-1]).cpu().numpy().tolist() # [N]
-
-                    # 3 gaussian distributions
-                    lower = []
-                    factor = (1 << precise) - (Max_Main - Min_Main + 1)
-                    for sample in samples:
-                        sample_ = np.repeat(sample-0.5, len(mean0_)).tolist()
-                        lower0 = list(map(ops.Decimal_cdf, sample_, mean0_, scale0_))
-                        lower1 = list(map(ops.Decimal_cdf, sample_, mean1_, scale1_))
-                        lower2 = list(map(ops.Decimal_cdf, sample_, mean2_, scale2_))        
-                        lower.append([int((Decimal(p0)*l0+Decimal(p1)*l1+Decimal(p2)*l2) * factor) for l0,l1,l2,p0,p1,p2 in zip(lower0, lower1, lower2, probs0_, probs1_, probs2_)])
-                    
-                    cdf_m = np.array(lower).transpose()
-                    cdf_m = cdf_m.astype(np.int) + samples.astype(np.int) - Min_Main
-=======
                     # t_h = time.time()
                     # for k in range(int(block_W_PAD / 16)):
 
@@ -631,7 +516,6 @@ def decode(bin_dir, rec_dir, model_dir, block_width, block_height):
 
                     cdf_m = np.array(lower).astype(np.int) + samples.astype(np.int) - Min_Main
                     
->>>>>>> 176b16e7961d9504ca35008c58dac1a4f9835c40
 
                     for k in range(int(block_W_PAD / 16)):
                         pixs = AE.decode_cdf(cdf_m[k, :].tolist())
@@ -695,11 +579,6 @@ if __name__ == '__main__':
     args = parser.parse_args()
   
     T = time.time()
-<<<<<<< HEAD
-    if args.coder_flag:
-#     if True:
-        encode(args.input, args.output, args.model_dir, args.model, args.block_width, args.block_height)
-=======
 
     if args.coder_flag:
         values = encode(args.input, args.output, args.model_dir, args.model, args.block_width, args.block_height)
@@ -709,7 +588,6 @@ if __name__ == '__main__':
             # np.save("debug/scale0",values[2].cpu().numpy())
             # np.save("debug/probs",values[3].cpu().numpy())
             np.save("debug/cdf",values[4])
->>>>>>> 176b16e7961d9504ca35008c58dac1a4f9835c40
     else:
         decode(args.input, args.output, args.model_dir, args.block_width, args.block_height)
                             
