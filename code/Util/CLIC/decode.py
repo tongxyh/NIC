@@ -52,7 +52,7 @@ for i in glob('*h.dc'):
     xq2 = tf.reshape(decoded, [1, H_PAD//64, W_PAD//64, 128])
     print (decoded)
 
-    # decode for main feature
+    # decode.py for main feature
     xq2 = torch.Tensor(xq2.numpy().transpose(0,3,1,2))
     with torch.no_grad():
         x3 = image_comp.hyper_dec(xq2)

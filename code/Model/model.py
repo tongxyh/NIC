@@ -10,6 +10,33 @@ from Model.factorized_entropy_model import Entropy_bottleneck
 from Model.gaussian_entropy_model import Distribution_for_entropy
 
 
+class Disc(nn.Module):
+    def __init__(self, M):
+        super(Disc, self).__init__()
+        self.conv1 = nn.Sequential(
+            nn.Conv2d(M, 12, 3, 1, 1),
+            nn.UpsamplingNearest2d(scale_factor=16)
+        )
+        self.conv2 = nn.Sequential(
+            nn.Conv2d(15, 64, 3, 2, 1),
+            nn.LeakyReLU(0.2),
+            nn.Conv2d(64, 128, 3, 2, 1),
+            nn.LeakyReLU(0.2),
+            nn.Conv2d(128, 256, 3, 2, 1),
+            nn.LeakyReLU(0.2),
+            nn.Conv2d(256, 512, 3, 2, 1),
+            nn.LeakyReLU(0.2),
+            nn.Conv2d(512, 1, 1, 1, 0),
+            nn.Sigmoid()
+        )
+
+    def forward(self, rec, fmap):
+        fmap = self.conv1(fmap)
+        conv2_in = torch.cat((rec, fmap), 1)
+        output = self.conv2(conv2_in)
+        return output
+
+
 class Enc(nn.Module):
     def __init__(self, num_features, N1, N2, M, M1):
         #input_features = 3, N1 = 192, N2 = 128, M = 192, M1 = 96

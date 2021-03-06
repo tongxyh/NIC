@@ -11,7 +11,7 @@
 #include <fstream>
 
 // replace this with your specific <Python.h> path
-#include </opt/conda/include/python3.6m/Python.h>
+#include </opt/conda/include/python3.7m/Python.h>
 
 #include "My_Range_Coder.h"
 
