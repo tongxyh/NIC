@@ -1,6 +1,6 @@
 ####       Tong Chen        ####
 #### tong@smail.nju.edu.cn  ####
-#### NIC-0.1-CLIC v0.1.20   ####
+#### NIC-0.1-CLIC v0.1.22   ####
 import argparse
 import math
 import os
@@ -61,6 +61,7 @@ def encode(im_dir, out_dir, model_dir, model_index, block_width, block_height):
     H, W, _ = img.shape
     num_pixels = H * W
     C = 3
+    N = 1
     Head = struct.pack('2HB', H, W, model_index)
     file_object.write(Head)
     ######################### spliting Image #########################
@@ -120,7 +121,6 @@ def encode(im_dir, out_dir, model_dir, model_index, block_width, block_height):
         #     sample = sample.cuda()
 
         # N mixed gaussian
-        N = 1
         #params = [torch.chunk(params_prob, 3*N, dim=1)[i].squeeze(1) for i in range(3*N)]
         params = [torch.chunk(params_prob, 9, dim=1)[i].squeeze(1) for i in range(3*N)]
         del params_prob
@@ -173,6 +173,16 @@ def encode(im_dir, out_dir, model_dir, model_index, block_width, block_height):
 
         else:
             print("[ROUND CHECK] PASSED!")
+        
+        ## TODO: save error correction info
+        def format_err(e):
+            return e[0]*e[1][1]
+
+        errm_format = [list(map(format_err,e)) for e in err_means]
+        errs_format = [list(map(format_err,e)) for e in err_scals]
+        with open(out_dir[:-4]+'_errs.npy', 'wb') as f:
+            np.save(f, np.array(errm_format))
+            np.save(f, np.array(errs_format))
 
         # print("Time (s):", time.time() - t)
         cdf_ = []
@@ -360,7 +370,8 @@ def decode(bin_dir, rec_dir, model_dir, block_width, block_height):
 
     c_main = 192
     c_hyper = 128
-    
+    N = 1
+
     M, N2 = 192, 128
     if (model_index == 6) or (model_index == 7) or (model_index == 14) or (model_index == 15):
         M, N2 = 256, 192
@@ -386,6 +397,35 @@ def decode(bin_dir, rec_dir, model_dir, block_width, block_height):
 
             block_H_PAD = int(tile * np.ceil(block_H / tile))
             block_W_PAD = int(tile * np.ceil(block_W / tile))
+
+            ## LOAD ERROR CORRECTTION INFO
+            with open(bin_dir[:-4]+'_errs.npy', 'rb') as f:
+                err_means = np.load(f).tolist() # [N, Datas]
+                err_scals = np.load(f).tolist()
+
+            err_means_dict, err_scals_dict = {}, {}
+            
+            def decode_err(e, H_PAD=block_H_PAD, W_PAD=block_W_PAD):
+                if e > 0:
+                    return ops.index_to_loc(e, H_PAD=block_H_PAD, W_PAD=block_W_PAD), 1
+                if e < 0:
+                    return ops.index_to_loc(-e, H_PAD=block_H_PAD, W_PAD=block_W_PAD), -1
+            for gmm_index in range(N):
+
+                for e in err_means[gmm_index]:
+                    loc,v = decode_err(e)
+                    loc = list(loc)
+                    loc.append(gmm_index)
+                    print(loc, v)
+                    err_means_dict[str.encode(str(loc))] = v
+
+                for e in err_scals[gmm_index]:
+                    loc,v = decode_err(e)
+                    loc = list(loc)
+                    loc.append(gmm_index)
+                    print(loc, v)
+                    err_scals_dict[str.encode(str(loc))] = v
+           
 
             with open("main.bin", 'wb') as f:
                 bits = file_object.read(FileSizeMain)
@@ -462,6 +502,16 @@ def decode(bin_dir, rec_dir, model_dir, block_width, block_height):
                     means  = [mean.cpu().numpy().tolist() for mean in means]                  
                     scales = [scale.cpu().numpy().tolist() for scale in scales]
                     probs = [probs[:,i].cpu().numpy().tolist() for i in range(N)]  #(N, len(Data))
+
+                    for gmm_index in range(N):
+                        for k in range(int(block_W_PAD / 16)):
+                            if str.encode(str([i,j,k,gmm_index])) in err_means_dict:
+                                print(i,j,k,gmm_index)
+                                means[gmm_index][k] = means[gmm_index][k] + 0.00001 * err_means_dict[str.encode(str([i,j,k,gmm_index]))]
+                        for k in range(int(block_W_PAD / 16)):
+                            if str.encode(str([i,j,k,gmm_index])) in err_scals_dict:
+                                print(i,j,k,gmm_index)
+                                scales[gmm_index][k] = scales[gmm_index][k] + 0.00001 * err_scals_dict[str.encode(str([i,j,k,gmm_index]))]
 
                     # 3 gaussian distributions
                     factor = (1 << precise) - (Max_Main - Min_Main + 1)

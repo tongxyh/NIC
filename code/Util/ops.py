@@ -52,10 +52,10 @@ def round_check(x):
     if x_l == x_u:
         return x_m, 0
     if x_m == x_l:
-        print(x, x_m, x_l, x_u)
+        # print(x, x_m, x_l, x_u)
         return x_l, -1
     else:
-        print(x, x_m, x_l, x_u)
+        # print(x, x_m, x_l, x_u)
         return x_u, 1
     return D(x).quantize(D("0.01")), 0
 
