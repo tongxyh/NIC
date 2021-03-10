@@ -5,21 +5,15 @@ import os
 from glob import glob
 
 # CLIC Valid
-images = glob("./valid/*.png")
-# Kodak
-# images = glob("/data/ljp105/NIC_Dataset/test/ClassD_Kodak/*.png")
-bins = glob('**/*.bin', recursive=True)
-print(bins)
+images = glob("../valid/*.png")
 os.chdir("./Util/AE")
 os.system('python setup.py build')
 os.system('python setup.py install')
 os.chdir("../..")
-for image in bins:
+for image in images:
     filename = image
-    # print(filename)
-    # cmd = "python inference.py --encode -i %s -o /output/%s -m_dir /model/wwxn1997/temp_models/ --block_width 2048 --block_height 1024 -m 0"%(image, filename[:-3]+"bin")
-    # os.system(cmd)
-    file_path_out = os.path.splitext(filename)[0] + '.png'
-    cmd = "python inference.py --decode -i %s -o %s -m_dir ./weights/ --block_width 2048 --block_height 1024 -m 0"%(filename, file_path_out)
+    file_path_out = os.path.splitext(filename)[0] + '.bin'
+    cmd = "python inference_fast.py --encode -i %s -o %s -m_dir ./Weights/ --block_width 2048 --block_height 1024 -m 0"%(image, file_path_out)
     os.system(cmd)
+
 
