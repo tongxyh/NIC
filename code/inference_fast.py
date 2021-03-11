@@ -21,8 +21,46 @@ from Model.context_model import Weighted_Gaussian
 os.environ['LRU_CACHE_CAPACITY'] = '1'
 GPU = True
 # index - [0-15]
-models = ["dists_mse_gan_simple2", "mse400", "mse800", "mse1600", "mse3200", "mse6400", "mse12800", "mse25600",
+models = ["dists_mse_gan_fast2", "mse400", "mse800", "mse1600", "mse3200", "mse6400", "mse12800", "mse25600",
           "msssim4", "msssim8", "msssim16", "msssim32", "msssim64", "msssim128", "msssim320", "msssim640"]
+
+
+def gaussian(size, sigma=12):  # create guassian window
+    gauss = torch.Tensor(
+        [math.exp(-(x - size // 2) ** 2 / float(2 * sigma ** 2)) for x in range(size)])
+    return gauss
+
+
+def edge_post_guassian(H, W, img_input, post_net, crop_size_w, crop_size_h):  # post processing
+    img_input = img_input.cuda()
+    img_input = img_input.unsqueeze(0)
+    Block_Num_in_Width = int(np.ceil(W / crop_size_w))
+    Block_Num_in_Height = int(np.ceil(H / crop_size_h))
+    proc_size = 16
+    edge_w_list = [crop_size_w * i for i in range(1, Block_Num_in_Width)]
+    edge_h_list = [crop_size_h * i for i in range(1, Block_Num_in_Height)]
+
+    for i in range(0, Block_Num_in_Height):
+        for pos in edge_w_list:
+            post_input = img_input[:, :, crop_size_h * i:crop_size_h * (i + 1),
+                         pos - proc_size:pos + proc_size]
+            post_output = post_net(post_input)
+            window_size = post_input.shape[3]
+            window = gaussian(window_size).cuda().view(1, 1, 1, -1)
+            img_input[:, :, crop_size_h * i:crop_size_h * (i + 1), pos - proc_size:pos + proc_size] = \
+                post_output * window + post_input * (1 - window)
+
+    for i in range(0, Block_Num_in_Width):
+        for pos in edge_h_list:
+            post_input = img_input[:, :, pos - proc_size:pos + proc_size,
+                         crop_size_w * i:crop_size_w * (i + 1)]
+            post_output = post_net(post_input)
+            window_size = post_input.shape[2]
+            window = gaussian(window_size).cuda().view(1, 1, -1, 1)
+            img_input[:, :, pos - proc_size:pos + proc_size, crop_size_w * i:crop_size_w * (i + 1)] = \
+                post_output * window + post_input * (1 - window)
+    img_input = img_input.squeeze(0)
+    return img_input
 
 
 @torch.no_grad()
@@ -194,7 +232,8 @@ def decode(bin_dir, rec_dir, model_dir, block_width, block_height):
     ############### retreive head info ###############
     T = time.time()
     file_object = open(bin_dir, 'rb')
-
+    post_net = model.PostProcNet(128).cuda()
+    post_net.load_state_dict(torch.load('./Weights/post_msssim4.pkl'))
     head_len = struct.calcsize('2HB')
     bits = file_object.read(head_len)
     [H, W, model_index] = struct.unpack('2HB', bits)
@@ -317,18 +356,25 @@ def decode(bin_dir, rec_dir, model_dir, block_width, block_height):
                 Recons), [1, c_main, int(block_H_PAD / 16), int(block_W_PAD / 16)])
             y_main_q = y_main_q.cuda()
             rec = image_comp.decoder(y_main_q)
-
-            output_ = torch.clamp(rec, min=0., max=1.0)
-            out = output_.data[0].cpu().numpy()
+            out = rec.data[0].cpu().numpy()
             out = out.transpose(1, 2, 0)
             out_img[H_offset: H_offset + block_H, W_offset: W_offset + block_W, :] = out[:block_H, :block_W, :]
             W_offset += block_W
             if W_offset >= W:
                 W_offset = 0
                 H_offset += block_H
+
+    out_img = torch.Tensor(out_img).cuda()
+    out_img = out_img.permute(2, 0, 1).contiguous()
+    out_img = edge_post_guassian(H=H, W=W, img_input=out_img, post_net=post_net, crop_size_h=block_height,
+                                 crop_size_w=block_width)
+    output_ = torch.clamp(out_img, min=0., max=1.0)
+    out_img = output_.data.cpu().numpy()
+    out_img = out_img.transpose(1, 2, 0)
     out_img = np.round(out_img * 255.0)
     out_img = out_img.astype('uint8')
-    img = Image.fromarray(out_img[:H, :W, :])
+    out_img = out_img[:H, :W, :]
+    img = Image.fromarray(out_img)
     img.save(rec_dir)
 
 
