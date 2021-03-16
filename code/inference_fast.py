@@ -21,7 +21,7 @@ from Model.context_model import Weighted_Gaussian
 os.environ['LRU_CACHE_CAPACITY'] = '1'
 GPU = True
 # index - [0-15]
-models = ["dists_mse_gan_fast2", "mse400", "mse800", "mse1600", "mse3200", "mse6400", "mse12800", "mse25600",
+models = ["dists_mse_gan_fast1", "dists_mse_gan_fast_VR_fine4", "dists_mse_gan_fast_8", "mse1600", "mse3200", "mse6400", "mse12800", "mse25600",
           "msssim4", "msssim8", "msssim16", "msssim32", "msssim64", "msssim128", "msssim320", "msssim640"]
 
 
@@ -36,7 +36,7 @@ def edge_post_guassian(H, W, img_input, post_net, crop_size_w, crop_size_h):  # 
     img_input = img_input.unsqueeze(0)
     Block_Num_in_Width = int(np.ceil(W / crop_size_w))
     Block_Num_in_Height = int(np.ceil(H / crop_size_h))
-    proc_size = 16
+    proc_size = 64
     edge_w_list = [crop_size_w * i for i in range(1, Block_Num_in_Width)]
     edge_h_list = [crop_size_h * i for i in range(1, Block_Num_in_Height)]
 
@@ -66,7 +66,7 @@ def edge_post_guassian(H, W, img_input, post_net, crop_size_w, crop_size_h):  # 
 @torch.no_grad()
 def encode(im_dir, out_dir, model_dir, model_index, block_width, block_height):
     file_object = open(out_dir, 'wb')
-
+    LAMB = 1.9999999
     M, N2 = 192, 128
     if (model_index == 6) or (model_index == 7) or (model_index == 14) or (model_index == 15):
         M, N2 = 256, 192
@@ -86,7 +86,7 @@ def encode(im_dir, out_dir, model_dir, model_index, block_width, block_height):
     H, W, _ = img.shape
     num_pixels = H * W
     C = 3
-    Head = struct.pack('2HB', H, W, model_index)
+    Head = struct.pack('f2HB', LAMB, H, W, model_index)
     file_object.write(Head)
     ######################### spliting Image #########################
     Block_Num_in_Width = int(np.ceil(W / block_width))
@@ -119,7 +119,7 @@ def encode(im_dir, out_dir, model_dir, model_index, block_width, block_height):
         Block_Idx += 1
 
         with torch.no_grad():
-            y_main, y_hyper = image_comp.encoder(im)
+            y_main, y_hyper = image_comp.encoder(im, LAMB)
             y_main_q = torch.round(y_main)
             y_main_q = torch.Tensor(y_main_q.cpu().numpy().astype(np.int))
             if GPU:
@@ -132,7 +132,7 @@ def encode(im_dir, out_dir, model_dir, model_index, block_width, block_height):
             if GPU:
                 y_hyper_q = y_hyper_q.cuda()
 
-            hyper_dec = image_comp.p(image_comp.hyper_dec(y_hyper_q))
+            hyper_dec = image_comp.p(image_comp.hyper_dec(y_hyper_q, LAMB), LAMB)
 
             # xp3, params_prob = context(y_main_q, hyper_dec)
 
@@ -234,9 +234,9 @@ def decode(bin_dir, rec_dir, model_dir, block_width, block_height):
     file_object = open(bin_dir, 'rb')
     post_net = model.PostProcNet(128).cuda()
     post_net.load_state_dict(torch.load('./Weights/post_msssim4.pkl'))
-    head_len = struct.calcsize('2HB')
+    head_len = struct.calcsize('f2HB')
     bits = file_object.read(head_len)
-    [H, W, model_index] = struct.unpack('2HB', bits)
+    [LAMB, H, W, model_index] = struct.unpack('f2HB', bits)
     # print("File Info:",Head)
     # Split Main & Hyper bins
     C = 3
@@ -309,7 +309,7 @@ def decode(bin_dir, rec_dir, model_dir, block_width, block_height):
             ############### Main Decoder ###############
             if GPU:
                 y_hyper_q = y_hyper_q.cuda()
-            hyper_dec = image_comp.p(image_comp.hyper_dec(y_hyper_q))
+            hyper_dec = image_comp.p(image_comp.hyper_dec(y_hyper_q,LAMB),LAMB)
             h, w = int(block_H_PAD / 16), int(block_W_PAD / 16)
             sample = np.arange(Min_Main, Max_Main + 1 + 1)  # [Min_V - 0.5 , Max_V + 0.5]
             sample = torch.FloatTensor(sample)
@@ -355,7 +355,7 @@ def decode(bin_dir, rec_dir, model_dir, block_width, block_height):
             y_main_q = torch.reshape(torch.Tensor(
                 Recons), [1, c_main, int(block_H_PAD / 16), int(block_W_PAD / 16)])
             y_main_q = y_main_q.cuda()
-            rec = image_comp.decoder(y_main_q)
+            rec = image_comp.decoder(y_main_q,LAMB)
             out = rec.data[0].cpu().numpy()
             out = out.transpose(1, 2, 0)
             out_img[H_offset: H_offset + block_H, W_offset: W_offset + block_W, :] = out[:block_H, :block_W, :]

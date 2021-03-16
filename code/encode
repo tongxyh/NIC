@@ -13,7 +13,7 @@ os.chdir("../..")
 for image in images:
     filename = image
     file_path_out = os.path.splitext(filename)[0] + '.bin'
-    cmd = "python inference_fast.py --encode -i %s -o %s -m_dir ./Weights/ --block_width 2048 --block_height 1024 -m 0"%(image, file_path_out)
+    cmd = "python inference_fast.py --encode -i %s -o %s -m_dir ./Weights/ --block_width 2048 --block_height 1024 -m 1"%(image, file_path_out)
     os.system(cmd)
 
 

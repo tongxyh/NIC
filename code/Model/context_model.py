@@ -4,10 +4,9 @@ import torch.nn.functional as f
 
 from Model.basic_module import ResBlock
 from Model.gaussian_entropy_model import Distribution_for_entropy2
-from Util.fix_point import Conv3d_Q, Conv2d_Q
+import Util.util_variable as uv
 
-
-class MaskConv3d(Conv3d_Q):
+class MaskConv3d(nn.Conv3d):
     def __init__(self, mask_type, in_ch, out_ch, kernel_size, stride, padding):
         super(MaskConv3d, self).__init__(in_ch, out_ch,
                                          kernel_size, stride, padding, bias=True)
@@ -85,12 +84,11 @@ class Resblock_3D(nn.Module):
 class P_Model(nn.Module):
     def __init__(self, M):
         super(P_Model, self).__init__()
-        self.context_p = nn.Sequential(ResBlock(M, M, 3, 1, 1), ResBlock(M, M, 3, 1, 1), ResBlock(M, M, 3, 1, 1),
-                                       nn.Conv2d(M, 2*M, 3, 1, 1))
+        self.context_p = uv.Csequential(ResBlock(M, M, 3, 1, 1), ResBlock(M, M, 3, 1, 1), ResBlock(M, M, 3, 1, 1),
+                                        uv.Cconv2d(M, 2 * M, 3, 1, 1))
 
-    def forward(self, x):
-
-        x = self.context_p(x)
+    def forward(self, x, lamb):
+        x = self.context_p(x, lamb)
         return x
 
 
@@ -99,9 +97,9 @@ class Weighted_Gaussian(nn.Module):
         super(Weighted_Gaussian, self).__init__()
         self.conv1 = MaskConv3d('A', 1, 24, 11, 1, 5)
 
-        self.conv2 = nn.Sequential(Conv3d_Q(25, 48, 1, 1, 0), nn.ReLU(), Conv3d_Q(48, 96, 1, 1, 0), nn.ReLU(),
-                                   Conv3d_Q(96, 9, 1, 1, 0))
-        self.conv3 = Conv2d_Q(M*2, M, 3, 1, 1)
+        self.conv2 = nn.Sequential(nn.Conv3d(25, 48, 1, 1, 0), nn.ReLU(), nn.Conv3d(48, 96, 1, 1, 0), nn.ReLU(),
+                                   nn.Conv3d(96, 9, 1, 1, 0))
+        self.conv3 = nn.Conv2d(M*2, M, 3, 1, 1)
 
         self.gaussin_entropy_func = Distribution_for_entropy2()
 
