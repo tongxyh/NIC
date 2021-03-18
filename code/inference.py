@@ -8,12 +8,12 @@ import struct
 import sys
 import time
 from functools import partial
-# from multiprocessing import Pool
+from multiprocessing import Pool
 from decimal import *
 import decimal
 D = Decimal
 decimal.getcontext().prec = 16
-
+from hashlib import sha224,sha256,md5
 from glob import glob
 
 import numpy as np
@@ -32,11 +32,14 @@ import profile
 # more details: https://github.com/pytorch/pytorch/issues/27971
 os.environ['LRU_CACHE_CAPACITY'] = '1'
 GPU = True
-DEBUG = True
+DEBUG = False
 
 # index - [0-15]
 models = ["mse200", "mse400", "mse800", "mse1600", "mse3200", "mse6400", "mse12800", "mse25600",
           "msssim4", "msssim8", "msssim16", "msssim32", "msssim64", "msssim128", "msssim320", "msssim640"]
+
+# def partial_cdf(args):
+#     return Decimal_cdf_partial (mean=args[0], scale=args[1])
 
 @torch.no_grad()
 def encode(im_dir, out_dir, model_dir, model_index, block_width, block_height):
@@ -48,6 +51,7 @@ def encode(im_dir, out_dir, model_dir, model_index, block_width, block_height):
     image_comp = model.Image_coding(3, M, N2, M, M//2)
     context = Weighted_Gaussian(M)
     ######################### Load Model #########################
+    print("====> Loading Model: ", os.path.join(model_dir, models[model_index] + r'.pkl'))
     image_comp.load_state_dict(torch.load(
         os.path.join(model_dir, models[model_index] + r'.pkl'), map_location='cpu'))
     context.load_state_dict(torch.load(
@@ -111,6 +115,11 @@ def encode(im_dir, out_dir, model_dir, model_index, block_width, block_height):
 
         # Main Arith Encode
         Datas = torch.reshape(y_main_q, [-1]).cpu().numpy().astype(np.int).tolist()
+        hasher = sha224()
+        hash_result = sha224(str(Datas).encode("utf-8")).hexdigest()
+        with open(out_dir[:-4]+'.hash', 'wb') as f:
+            f.write(str(hash_result).encode("utf-8"))
+
         Max_Main = max(Datas)
         Min_Main = min(Datas)
         sample = np.arange(Min_Main, Max_Main+1+1).tolist()  # [Min_V - 0.5 , Max_V + 0.5]
@@ -126,7 +135,7 @@ def encode(im_dir, out_dir, model_dir, model_index, block_width, block_height):
         del params_prob
         # keep the weight summation of prob == 1
         probs = torch.stack(params[0:3*N:3], dim=-1)
-        probs = F.softmax(probs.cpu(), dim=-1)
+        probs = F.softmax(probs, dim=-1)
         
         probs = [probs[:,:,:,:,i] for i in range(N)]  
         means = params[1:3*N:3]
@@ -140,11 +149,24 @@ def encode(im_dir, out_dir, model_dir, model_index, block_width, block_height):
         scales_ = [torch.reshape(scale, [-1]).cpu().numpy().tolist() for scale in scales]
         probs_  = [torch.reshape(prob,[-1]).cpu().numpy().tolist() for prob in probs]
         
+        if DEBUG:
+            # pass
+            i_,j_,k_ = 137, 16, 67
+            index = i_ * (block_H_PAD/16*block_W_PAD/16) + j_ * (block_W_PAD/16) + k_
+            print("Before Round:", means[0][0,i_,j_,k_], means_[0][int(index)], scales[0][0,i_,j_,k_], scales_[0][int(index)])
+
         ###### rounding error check ######
         means_  = [list(map(ops.round_check, mean)) for mean in means_]
         scales_ = [list(map(ops.round_check, scale)) for scale in scales_]
         # probs_ = [list(map(Decimal, prob)) for prob in probs_]
-      
+        
+        if DEBUG:
+            # pass
+            # # def loc_to_index(i=0,j=0,k=0):
+            # #     pass
+            index = i_ * (block_H_PAD/16*block_W_PAD/16) + j_ * (block_W_PAD/16) + k_
+            print("After Round:", means_[0][int(index)], scales_[0][int(index)])
+
         def err_index(dat_):
             return [[i,x] for i,x in enumerate(dat_) if x[1] != 0]
 
@@ -158,18 +180,19 @@ def encode(im_dir, out_dir, model_dir, model_index, block_width, block_height):
         
         if err_len > 0:
             print("[WARNING] Found %d possible rounding errors"%(err_len))
-            for i,x in enumerate(err_means):
-                print("==== Mean", i)
-                for j in x:
-                    print(ops.index_to_loc(j[0], H_PAD=block_H_PAD, W_PAD=block_W_PAD), j[0], j[1]) # [index, value]
-            for i,x in enumerate(err_scals):
-                print("==== Scal", i)
-                for j in x:
-                    print(ops.index_to_loc(j[0], H_PAD=block_H_PAD, W_PAD=block_W_PAD), j[0], j[1]) # [index, value]
-            for i,x in enumerate(err_probs):
-                print("==== Prob", i)
-                for j in x:
-                    print(ops.index_to_loc(j[0], H_PAD=block_H_PAD, W_PAD=block_W_PAD), j[0], j[1]) # [index, value]
+            if DEBUG:
+                for i,x in enumerate(err_means):
+                    print("==== Mean", i)
+                    for j in x:
+                        print(ops.index_to_loc(j[0], H_PAD=block_H_PAD, W_PAD=block_W_PAD), j[0], j[1]) # [index, value]
+                for i,x in enumerate(err_scals):
+                    print("==== Scal", i)
+                    for j in x:
+                        print(ops.index_to_loc(j[0], H_PAD=block_H_PAD, W_PAD=block_W_PAD), j[0], j[1]) # [index, value]
+                for i,x in enumerate(err_probs):
+                    print("==== Prob", i)
+                    for j in x:
+                        print(ops.index_to_loc(j[0], H_PAD=block_H_PAD, W_PAD=block_W_PAD), j[0], j[1]) # [index, value]
 
         else:
             print("[ROUND CHECK] PASSED!")
@@ -392,8 +415,25 @@ def decode(bin_dir, rec_dir, model_dir, block_width, block_height):
             Block_head_len = struct.calcsize('2H4h2I')
             bits = file_object.read(Block_head_len)
             [block_H, block_W, Min_Main, Max_Main, Min_V_HYPER, Max_V_HYPER, FileSizeMain, FileSizeHyper] = struct.unpack('2H4h2I', bits)
-
             precise, tile = 16, 64.
+            factor = (1 << precise) - (Max_Main - Min_Main + 1)
+
+            def cdf_sample(l,p):
+                # p0 = Decimal(p0).quantize(Decimal("0.0000001"))
+                # p1 = Decimal(p1).quantize(Decimal("0.0000001"))
+                # p2 = Decimal(p2).quantize(Decimal("0.0000001"))
+                # if p0 <= p2 and p1 <= p2:
+                #     return int((p0*l0+p1*l1+(1-p0-p1)*l2) * factor/10)*10
+                # if p0 <= p1 and p2 <= p1:
+                #     return int((p0*l0+(1-p0-p2)*l1+p2*l2) * factor/10)*10
+                # if p1 <= p0 and p2 <= p0:
+                #     return int(((1-p1-p2)*l0+p1*l1+p2*l2) * factor/10)*10
+                # print("[WARNING] Found Equal prob weights [0 1 2]: ", p0,p1,p2)
+                quan_step = 1
+                v = sum([D(p_)*l_ for p_,l_ in zip(p,l)])
+                if v >=1:
+                    return factor
+                return quan_step*int(v*factor/quan_step)
 
             block_H_PAD = int(tile * np.ceil(block_H / tile))
             block_W_PAD = int(tile * np.ceil(block_W / tile))
@@ -464,6 +504,16 @@ def decode(bin_dir, rec_dir, model_dir, block_width, block_height):
             h, w = int(block_H_PAD / 16), int(block_W_PAD / 16)
             samples = np.arange(Min_Main, Max_Main+1+1)  # [Min_V - 0.5 , Max_V + 0.5]
 
+            Decimal_cdf_partial = partial(ops.Decimal_cdf_, x=samples.tolist())
+                    
+            def partial_cdf(mean, scale):
+                return Decimal_cdf_partial(mean=mean, scale=scale)
+            def func(l,p):
+                # [N, len(samples)], [N]
+                partial_cdf = partial(cdf_sample, p=p)
+                l = [l_ for l_ in zip(*l)] #[len(sample), N]
+                return list(map(partial_cdf, l))
+
             p3d = (5, 5, 5, 5, 5, 5)
             y_main_q = torch.zeros(1, 1, c_main+10, h+10, w+10)  # 8000x4000 -> 500*250
             if GPU:
@@ -486,14 +536,13 @@ def decode(bin_dir, rec_dir, model_dir, block_width, block_height):
                     params_prob = context.conv2(torch.cat((x1, hyper[:, :, i:i+1, j:j+1, :]), dim=1))
 
                     # N mixed gaussian
-                    N = 1
                     # params = [torch.chunk(params_prob, 3*N, dim=1)[i].squeeze(1) for i in range(3*N)]
                     params = [torch.chunk(params_prob, 9, dim=1)[i].squeeze(1) for i in range(3*N)]
                     
                     params = [x[0,0,0,:] for x in params]
                     # keep the weight summation of prob == 1
                     probs = torch.stack(params[0:3*N:3], dim=-1)
-                    probs = F.softmax(probs.cpu(), dim=-1)
+                    probs = F.softmax(probs, dim=-1)
                     
                     # process the scale value to positive non-zero
                     means = params[1:3*N:3]
@@ -503,67 +552,52 @@ def decode(bin_dir, rec_dir, model_dir, block_width, block_height):
                     scales = [scale.cpu().numpy().tolist() for scale in scales]
                     probs = [probs[:,i].cpu().numpy().tolist() for i in range(N)]  #(N, len(Data))
 
-                    for gmm_index in range(N):
-                        for k in range(int(block_W_PAD / 16)):
-                            if str.encode(str([i,j,k,gmm_index])) in err_means_dict:
-                                print(i,j,k,gmm_index)
-                                means[gmm_index][k] = means[gmm_index][k] + 0.00001 * err_means_dict[str.encode(str([i,j,k,gmm_index]))]
-                        for k in range(int(block_W_PAD / 16)):
-                            if str.encode(str([i,j,k,gmm_index])) in err_scals_dict:
-                                print(i,j,k,gmm_index)
-                                scales[gmm_index][k] = scales[gmm_index][k] + 0.00001 * err_scals_dict[str.encode(str([i,j,k,gmm_index]))]
+                    # for gmm_index in range(N):
+                    #     for k in range(int(block_W_PAD / 16)):
+                    #         loc_ = str.encode(str([i,j,k,gmm_index]))
+                    #         if loc_ in err_means_dict:
+                    #             print(i,j,k,gmm_index)
+                    #             means[gmm_index][k] = means[gmm_index][k] + 0.00001 * err_means_dict[loc_]
+                    #         if loc_ in err_scals_dict:
+                    #             print(i,j,k,gmm_index)
+                    #             scales[gmm_index][k] = scales[gmm_index][k] + 0.00001 * err_scals_dict[loc_]
 
                     # 3 gaussian distributions
-                    factor = (1 << precise) - (Max_Main - Min_Main + 1)
 
                     ###### rounding error check ######
                     # TODO: decoder version round_check 
-                    means_  = [list(map(ops.round_check, mean)) for mean in means]
-                    scales_ = [list(map(ops.round_check, scale)) for scale in scales]
+                    # t = time.time()
+                    means_  = [list(map(ops.round_check_test, mean)) for mean in means]
+                    scales_ = [list(map(ops.round_check_test, scale)) for scale in scales]
+                    # print("Round Check:",time.time()-t)
 
                     # TODO: round_check of probs
                     # probs0_ = list(map(ops.round_check, probs0_))
                     # probs1_ = list(map(ops.round_check, probs1_))
 
+                    ## TODO: Multiprocessing
+                    
                     # t = time.time()
-                    Decimal_cdf_partial = partial(ops.Decimal_cdf_, x=samples.tolist())
-                    def partial_cdf(mean, scale):
-                        return Decimal_cdf_partial(mean=mean, scale=scale)
+                    # lowers_ = []
+                    # p = Pool(2)
+                    # for mean_, scale_ in zip(means_, scales_):
+                    #     lowers_.append(p.map(partial_cdf, [mean_, scale_]))
+                    #     # p.close()
+                    #     # p.join()
+                    # print("Mutli:",time.time()-t)    
+                    # t = time.time()
                     lowers_ = [list(map(partial_cdf, mean_, scale_)) for mean_,scale_ in zip(means_, scales_)] # [N, len(Data), len(samples)]
-                    # print(j, "decimal cdf:",time.time()-t)
+                    # print("Decimal CDF:",time.time()-t)
                     
                     # t = time.time()   
-                    def cdf_sample(l,p):
-                        # p0 = Decimal(p0).quantize(Decimal("0.0000001"))
-                        # p1 = Decimal(p1).quantize(Decimal("0.0000001"))
-                        # p2 = Decimal(p2).quantize(Decimal("0.0000001"))
-                        # if p0 <= p2 and p1 <= p2:
-                        #     return int((p0*l0+p1*l1+(1-p0-p1)*l2) * factor/10)*10
-                        # if p0 <= p1 and p2 <= p1:
-                        #     return int((p0*l0+(1-p0-p2)*l1+p2*l2) * factor/10)*10
-                        # if p1 <= p0 and p2 <= p0:
-                        #     return int(((1-p1-p2)*l0+p1*l1+p2*l2) * factor/10)*10
-                        # print("[WARNING] Found Equal prob weights [0 1 2]: ", p0,p1,p2)
-                        quan_step = 1
-                        v = sum([D(p_)*l_ for p_,l_ in zip(p,l)])
-                        if v >=1:
-                            return factor
-                        return quan_step*int(v*factor/quan_step)
-                    probs_ = [p for p in zip(*probs)] # [len(Data), N]
-                    lowers_ = [l for l in zip(*lowers_)]
-                    # input : [len(Data), N, len(samples)], [len(Data), N]
-                    # output: [len(Data), len(samples)]
+                    # GMM
+                    # probs_ = [p for p in zip(*probs)]    # [len(Data), N]
+                    # lowers_ = [l for l in zip(*lowers_)] # [len(Data), N, len(samples)], [len(Data), N]
+                    # lower = [func(l,p) for l,p in zip(lowers_, probs_)] # [len(Data), len(sample)]
                     
-                    def func(l,p):
-                        # [N, len(samples)], [N]
-                        partial_cdf = partial(cdf_sample, p=p)
-                        l = [l_ for l_ in zip(*l)] #[len(sample), N]
-                        return list(map(partial_cdf, l))
-
-                    lower = [func(l,p) for l,p in zip(lowers_, probs_)] # [len(Data), len(sample)]
-                    
+                    # CLIC single gaussain
+                    lower = lowers_[0]
                     # print(j, "final mix cdf:",time.time()-t)
-
                     cdf_m = np.array(lower).astype(np.int) + samples.astype(np.int) - Min_Main
                     
 
@@ -633,11 +667,11 @@ if __name__ == '__main__':
     if args.coder_flag:
         values = encode(args.input, args.output, args.model_dir, args.model, args.block_width, args.block_height)
         if DEBUG:
-            np.save("debug/encode",values[0].cpu().numpy())
+            np.save("/output/encode",values[0].cpu().numpy())
             # np.save("debug/mean0",values[1].cpu().numpy())
             # np.save("debug/scale0",values[2].cpu().numpy())
             # np.save("debug/probs",values[3].cpu().numpy())
-            np.save("debug/cdf",values[4])
+            np.save("/output/cdf",values[4])
     else:
         decode(args.input, args.output, args.model_dir, args.block_width, args.block_height)
                             
