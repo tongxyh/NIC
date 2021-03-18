@@ -1,6 +1,6 @@
 ####       Tong Chen        ####
 #### tong@smail.nju.edu.cn  ####
-#### NIC-0.1-CLIC v0.1.22   ####
+#### NIC-0.1-CLIC v0.2.0   ####
 import argparse
 import math
 import os
