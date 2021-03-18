@@ -64,12 +64,12 @@ class Enc(nn.Module):
         x3 = self.down1(x3)
         x4 = self.trunk3(x3)
         x5 = self.trunk4(x4)
-        x6 = self.trunk5(x5)*f.sigmoid(self.mask2(x5)) + x5
+        x6 = self.trunk5(x5)*torch.sigmoid(self.mask2(x5)) + x5
 
         # hyper
         x7 = self.trunk6(x6)
         x8 = self.trunk7(x7)
-        x9 = self.trunk8(x8)*f.sigmoid(self.mask3(x8)) + x8
+        x9 = self.trunk8(x8)*torch.sigmoid(self.mask3(x8)) + x8
         x10 = self.conv2(x9)
 
         return x6, x10
@@ -96,7 +96,7 @@ class Hyper_Dec(nn.Module):
     def forward(self, xq2):
 
         x1 = self.conv1(xq2)
-        x2 = self.trunk1(x1) * f.sigmoid(self.mask1(x1)) + x1
+        x2 = self.trunk1(x1) * torch.sigmoid(self.mask1(x1)) + x1
         x3 = self.trunk2(x2)
         x4 = self.trunk3(x3)
 
@@ -137,7 +137,7 @@ class Dec(nn.Module):
 
     def forward(self, x):
 
-        x1 = self.trunk1(x)*f.sigmoid(self.mask1(x))+x
+        x1 = self.trunk1(x)*torch.sigmoid(self.mask1(x))+x
         x1 = self.up1(x1)
         x2 = self.trunk2(x1)
         x3 = self.trunk3(x2)

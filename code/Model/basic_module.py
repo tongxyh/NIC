@@ -59,8 +59,8 @@ class Non_local_Block(nn.Module):
         self.theta = nn.Conv2d(self.in_channel, self.out_channel, 1, 1, 0)
         self.phi = nn.Conv2d(self.in_channel, self.out_channel, 1, 1, 0)
         self.W = nn.Conv2d(self.out_channel, self.in_channel, 1, 1, 0)
-        nn.init.constant(self.W.weight, 0)
-        nn.init.constant(self.W.bias, 0)
+        nn.init.constant_(self.W.weight, 0)
+        nn.init.constant_(self.W.bias, 0)
 
     def forward(self, x):
         # x_size: (b c h w)

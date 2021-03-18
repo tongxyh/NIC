@@ -90,10 +90,10 @@ class Entropy_bottleneck(nn.Module):
             logits += bias
 
             if i < len(self._factor):
-                factor = f.tanh(self._factor[i])
+                factor = torch.tanh(self._factor[i])
                 if stop_gradient:
                     factor = factor.detach()
-                logits += factor * f.tanh(logits)
+                logits += factor * torch.tanh(logits)
         return logits
 
     def add_noise(self, x):
@@ -117,7 +117,7 @@ class Entropy_bottleneck(nn.Module):
         sign = -torch.sign(torch.add(lower, upper))
         sign = sign.detach()
         likelihood = torch.abs(
-            f.sigmoid(sign * upper) - f.sigmoid(sign * lower))
+            torch.sigmoid(sign * upper) - torch.sigmoid(sign * lower))
 
         if self.likelihood_bound > 0:
             likelihood = Low_bound.apply(likelihood)

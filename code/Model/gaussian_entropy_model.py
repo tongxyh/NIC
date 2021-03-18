@@ -44,7 +44,7 @@ class Distribution_for_entropy(nn.Module):
 
         #sign = -torch.sign(torch.add(lower, upper))
         #sign = sign.detach()
-        #likelihood = torch.abs(f.sigmoid(sign * upper) - f.sigmoid(sign * lower))
+        #likelihood = torch.abs(torch.sigmoid(sign * upper) - torch.sigmoid(sign * lower))
         likelihood = torch.abs(upper - lower)
 
         likelihood = Low_bound.apply(likelihood)
@@ -70,7 +70,7 @@ class Distribution_for_entropy3(nn.Module):
 
         #sign = -torch.sign(torch.add(lower, upper))
         #sign = sign.detach()
-        #likelihood = torch.abs(f.sigmoid(sign * upper) - f.sigmoid(sign * lower))
+        #likelihood = torch.abs(torch.sigmoid(sign * upper) - torch.sigmoid(sign * lower))
         likelihood = torch.abs(upper - lower)
 
         likelihood = Low_bound.apply(likelihood)
