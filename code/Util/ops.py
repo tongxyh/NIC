@@ -46,9 +46,14 @@ def round_check(x):
     
     # max observed error 8e-6
     # closer to zero, less error, can it help?
-    x_l = D(x-(abs(x)*0.000001)).quantize(D("0.01"))
-    x_u = D(x+(abs(x)*0.000001)).quantize(D("0.01"))
-
+    err_step = 2e-6
+    if abs(x) >= 1:
+        x_l = D(x-(abs(x)*err_step)).quantize(D("0.01"))
+        x_u = D(x+(abs(x)*err_step)).quantize(D("0.01"))
+    else:
+        x_l = D(x-err_step).quantize(D("0.01"))
+        x_u = D(x+err_step).quantize(D("0.01"))
+ 
     if x_l == x_u:
         return x_m, 0
     if x_m == x_l:
@@ -58,6 +63,9 @@ def round_check(x):
         # print(x, x_m, x_l, x_u)
         return x_u, 1
     return D(x).quantize(D("0.01")), 0
+
+def round_check_test(x):
+    return D(x).quantize(D("0.01"))
 
 def quick_search(x, i):
     global lower,upper
@@ -86,14 +94,16 @@ def quick_search(x, i):
 #         upper = 4
 #     print(len(table))
 #     return table
-
+table_num = 35000
+level_table = int(table_num*10/35)
 def cdf_table():
     table = []
+
     decimal.getcontext().prec = 16
     append = table.append
     for i in range(0,table_num+1): # [0.00000 - 3.50000]
         # print(i/100000, quantized_erf(Decimal(i)/100000))
-        append(quantized_erf(Decimal(i)/100000))
+        append(quantized_erf(Decimal(3.5)*Decimal(i)/table_num))
     return table
 
 def quantized_erf(x, level=1):
@@ -111,18 +121,28 @@ def quantized_erf(x, level=1):
     if level == 1:
         return 1-1/(1+a1*x+a2*(x**n2)+a3*(x**n3)+a4*(x**4)+a5*(x**5)+a6*(x**6))**16
 
+eps = D("0.00001")
 def Decimal_cdf(x,mean,scale):
-    x = (Decimal(x).quantize(D("0.0001"))-mean[0]-half)/(sqrt2*scale[0]+D("0.00001"))
+    x = (Decimal(x)-mean[0]-half)/(sqrt2*scale[0]+eps)
     sign = half if x >= 0 else -half
     if abs(x) > Decimal(3.5):
         return half + sign
     else:
-        return half + sign*table[int(abs(x.quantize(quan_prec)*100000))]
-        # return half + sign*half*quantized_erf(abs(x))
+        return half + sign*table[int(abs(x*level_table))]
+
+def Decimal_cdf_fast(x,mean,scale):
+    x = (x-mean)/scale
+    sign = half if x >= 0 else -half
+    if abs(x) > Decimal(3.5):
+        return half + sign
+    else:
+        return half + sign*table[int(abs(x*level_table))]
 
 def Decimal_cdf_(x, mean=0, scale=D(1e-6)):
     # batch version
-    partial_func = partial(Decimal_cdf,mean=mean,scale=scale)
+    mean = mean + half
+    scale = scale*sqrt2 + eps
+    partial_func = partial(Decimal_cdf_fast,mean=mean,scale=scale)
     return list(map(partial_func, x))
 
 def erf(x, level=0):
@@ -154,3 +174,6 @@ table = cdf_table()
 # for i in range(2000):
 #     lp_wrapper(0,1,2)
 # lp.print_stats()
+# print("DEBUGING")
+# print(65450*Decimal_cdf(x=1,mean=[D("-0.01"),0], scale=[D("0.59"),0]))
+# print(65450*Decimal_cdf(x=0,mean=[D("-0.01"),0], scale=[D("0.59"),0]))
