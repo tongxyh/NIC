@@ -59,6 +59,7 @@ def encode(im_dir, out_dir, model_dir, model_index, block_width, block_height):
     if GPU:
         image_comp = image_comp.cuda()
         context = context.cuda()
+    context.conv1.mask[:, :, 5, 5, :] = 0
     ######################### Read Image #########################
     img = Image.open(im_dir)
     img = np.array(img)/255.0
