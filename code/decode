@@ -7,9 +7,12 @@ from glob import glob
 
 
 def decode_batch(bin_list):
+    index_ = 0
     for filename in bin_list:
+        index_ = index_ + 1
         file_path_out = os.path.splitext(filename)[0] + '.png'
-        cmd = "python inference.py --decode -i %s -o %s -m_dir ./weights/ --block_width 2048 --block_height 1024 -m 0" % (
+        print(index_, filename, file_path_out)
+        cmd = "python inference_clic.py --decode -i %s -o %s -m_dir ./Weights/ --block_width 3000 --block_height 3000 -m 8" % (
             filename, file_path_out)
         os.system(cmd)
 
@@ -20,15 +23,20 @@ if __name__ == '__main__':
     os.system('python setup.py build')
     os.system('python setup.py install')
     os.chdir("../..")
-    bin_list_len = bins.__len__()
-    bin_list_1 = bins[:bin_list_len // 2]
-    bin_list_2 = bins[bin_list_len // 2:]
-    threads = []
-    t1 = threading.Thread(target=decode_batch, args=(bin_list_1,))
-    threads.append(t1)
-    t2 = threading.Thread(target=decode_batch, args=(bin_list_2,))
-    threads.append(t2)
-    for t in threads:
-        t.start()
-    for t in threads:
-        t.join()
+
+    os.system("ls")
+
+    decode_batch(bins)
+    
+    # bin_list_len = bins.__len__()
+    # bin_list_1 = bins[:bin_list_len // 2]
+    # bin_list_2 = bins[bin_list_len // 2:]
+    # threads = []
+    # t1 = threading.Thread(target=decode_batch, args=(bin_list_1,))
+    # threads.append(t1)
+    # t2 = threading.Thread(target=decode_batch, args=(bin_list_2,))
+    # threads.append(t2)
+    # for t in threads:
+    #     t.start()
+    # for t in threads:
+    #     t.join()
