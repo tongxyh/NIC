@@ -11,7 +11,11 @@ This project is based on NIC reference software.
 2. save err correction info to avoid rounding error at decoder side.
 3. save hash info for decoder to check equality.
 
+## NIC_0.1_CLIC-v0.2.1 (Final Version for CLIC2021):
+1. set err_step to 5e-6 for rounding error check.
+2. external masking for row-wise context model.
+
 # TODO
-3. content adaptive
-4. postprocessing
-5. variable rate
+1. content adaptive
+2. pre and post processing
+3. variable rate
