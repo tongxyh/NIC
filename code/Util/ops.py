@@ -46,7 +46,7 @@ def round_check(x):
     
     # max observed error 8e-6
     # closer to zero, less error, can it help?
-    err_step = 2e-6
+    err_step = 5e-6
     if abs(x) >= 1:
         x_l = D(x-(abs(x)*err_step)).quantize(D("0.01"))
         x_u = D(x+(abs(x)*err_step)).quantize(D("0.01"))
