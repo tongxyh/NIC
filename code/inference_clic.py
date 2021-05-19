@@ -26,7 +26,7 @@ from PIL import Image
 import AE
 import Model.model as model
 from Model.context_model import Weighted_Gaussian
-from Util import ops
+from Util import ops_decimal as ops
 
 import profile
 # avoid memory leak during cpu inference for Pytorch < 1.5
